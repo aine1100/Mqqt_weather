@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Monitoring Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .dashboard {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 800px;
+            text-align: center;
+        }
+        .metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 30px;
+        }
+        .metric {
+            background: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            width: 45%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .metric h3 {
+            color: #34495e;
+            margin-bottom: 10px;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        canvas {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Weather Monitoring Dashboard</h1>
+    <div class="dashboard">
+        <div class="metrics">
+            <div class="metric">
+                <h3>Temperature</h3>
+                <p><span id="temperatureValue" class="metric-value">--</span> °C</p>
+            </div>
+            <div class="metric">
+                <h3>Humidity</h3>
+                <p><span id="humidityValue" class="metric-value">--</span> %</p>
+            </div>
+        </div>
+        <canvas id="weatherChart"></canvas>
+    </div>
+
+    <script>
+        // MQTT Client Setup
+        const client = mqtt.connect('ws://157.173.101.159:9001'); // MQTT broker URL
+
+        // Chart Initialization
+        const chartContext = document.getElementById('weatherChart').getContext('2d');
+        const timeStamps = [];
+        let timeElapsed = 0; // Tracks time in minutes
+
+        const weatherChart = new Chart(chartContext, {
+            type: 'line',
+            data: {
+                labels: timeStamps,
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: [],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.2)',
+                        borderWidth: 2,
+                        fill: true
+                    },
+                    {
+                        label: 'Humidity (%)',
+                        data: [],
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.2)',
+                        borderWidth: 2,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Values'
+                        },
+                        beginAtZero: false
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time (minutes)'
+                        },
+                        ticks: {
+                            stepSize: 5
+                        }
+                    }
+                },
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                }
+            }
+        });
+
+        // Data Arrays
+        let temperatureReadings = [];
+        let humidityReadings = [];
+        const startTimestamp = Date.now();
+
+        // MQTT Event Handlers
+        client.on('connect', () => {
+            console.log('Connected to MQTT Broker');
+            client.subscribe('/work_group_01/room_temp/temperature');
+            client.subscribe('/work_group_01/room_temp/humidity');
+        });
+
+        client.on('message', (topic, message) => {
+            console.log(`Received: ${topic} → ${message.toString()}`);
+            const currentTime = Math.floor((Date.now() - startTimestamp) / 60000); // Time in minutes
+
+            if (topic === '/work_group_01/room_temp/temperature') {
+                const temperature = parseFloat(message.toString());
+                document.getElementById('temperatureValue').innerText = temperature.toFixed(2);
+                temperatureReadings.push(temperature);
+            } else if (topic === '/work_group_01/room_temp/humidity') {
+                const humidity = parseFloat(message.toString());
+                document.getElementById('humidityValue').innerText = humidity.toFixed(2);
+                humidityReadings.push(humidity);
+            }
+        });
+
+        // Calculate Averages and Update Chart
+        const updateAverages = () => {
+            if (temperatureReadings.length > 0 && humidityReadings.length > 0) {
+                const avgTemperature = temperatureReadings.reduce((a, b) => a + b, 0) / temperatureReadings.length;
+                const avgHumidity = humidityReadings.reduce((a, b) => a + b, 0) / humidityReadings.length;
+
+                // Update Chart
+                timeStamps.push(timeElapsed);
+                weatherChart.data.datasets[0].data.push(avgTemperature);
+                weatherChart.data.datasets[1].data.push(avgHumidity);
+                weatherChart.update();
+
+                // Reset Data Arrays
+                temperatureReadings = [];
+                humidityReadings = [];
+                timeElapsed += 5;
+
+                console.log('Temperature:', weatherChart.data.datasets[0].data.slice(-1)[0]);
+                console.log('Humidity:', weatherChart.data.datasets[1].data.slice(-1)[0]);
+            }
+        };
+
+        // Send Data to Backend
+        const sendData = () => {
+            $.ajax({
+                url: 'http://localhost:5000/weather_api',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    temperature: weatherChart.data.datasets[0].data.slice(-1)[0],
+                    humidity: weatherChart.data.datasets[1].data.slice(-1)[0],
+                    timestamp: new Date().getTime()
+                }),
+                success: (response) => {
+                    console.log(response.message);
+                },
+                error: (xhr, status, error) => {
+                    console.error('Error:', error);
+                }
+            });
+        };
+
+        // Intervals
+        setInterval(updateAverages, 5000); // 5 seconds (change to 300000 for 5 minutes)
+        setInterval(sendData, 5000); // 5 seconds (change to 300000 for 5 minutes)
+    </script>
+</body>
+</html>
