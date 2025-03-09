@@ -41,7 +41,7 @@ def hello_world():
 
 @app.route("/home")
 def home():
-    return send_from_directory('templates', 'index.html')
+    return send_from_directory('templates', 'index.htm')
 
 # Endpoint to handle saving and fetching weather data
 @app.route('/weather_api', methods=['POST', 'GET'])
